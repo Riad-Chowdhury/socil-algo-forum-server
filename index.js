@@ -29,7 +29,7 @@ async function run() {
       .db("forumWabCode")
       .collection("announcement");
     const postsCollection = client.db("forumWabCode").collection("posts");
-
+    const commentsCollection = client.db("forumWabCode").collection("comments");
     // add tags
     app.get("/tags", async (req, res) => {
       const result = await tagsCollection.find().toArray();
@@ -95,6 +95,22 @@ async function run() {
       const query = { _id: new ObjectId(id) };
       const result = await postsCollection.deleteOne(query);
       res.send(result);
+    });
+
+    // COMMENT
+    app.get("/comments/:postId", async (req, res) => {
+      const postId = req.params.postId;
+      const comments = await commentsCollection
+        .find({ postId: postId })
+        .toArray();
+      res.send(comments);
+    });
+
+    // Add comment
+    app.post("/comments", async (req, res) => {
+      const newComment = req.body;
+      const result = await commentsCollection.insertOne(newComment);
+      res.send({ ...newComment, _id: result.insertedId });
     });
 
     // Send a ping to confirm a successful connection
