@@ -32,7 +32,8 @@ const run = async () => {
     );
 
     app.get("/t", (req, res) => {
-      return res.send("OK2");
+      console.log(Math.round(Math.random() * 50000000));
+      return res.send("OK3");
     });
 
     const tagsCollection = client.db("forumWabCode").collection("tags");
