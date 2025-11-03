@@ -6,6 +6,8 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster
 const mongoURI = uri;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
+const stripe = require("stripe")(process.env.PAYMENT_GATEWAY_KEY);
+
 //app
 const app = express();
 
@@ -43,6 +45,7 @@ const run = async () => {
     const postsCollection = client.db("forumWabCode").collection("posts");
     const commentsCollection = client.db("forumWabCode").collection("comments");
     const postCollection = client.db("forumWabCode").collection("post");
+    const paymentsCollection = client.db("forumWabCode").collection("payments");
     // add tags
     app.get("/tags", async (req, res) => {
       const result = await tagsCollection.find().toArray();
@@ -132,7 +135,219 @@ const run = async () => {
       res.send({ ...newComment, _id: result.insertedId });
     });
 
+    // handle-payment
+    // app.post("/handle-payment", async (req, res) => {
+    //   const paymentIntent = await stripe.paymentIntents.create({
+    //     amount: 10000,
+    //     currency: "usd",
+    //     payment_method: req.body.id,
+    //     confirm: true,
+    //     automatic_payment_methods: {
+    //       enabled: true,
+    //       allow_redirects: "never",
+    //     },
+    //   });
+
+    //   if (paymentIntent.status == "succeeded") {
+    //     return res.json({ success: true });
+    //   }
+
+    //   return res.json({ success: false });
+    // });
+
+    // payment/////////////
+
+    app.get("/payments", async (req, res) => {
+      const email = req.params.email;
+      try {
+        const history = await paymentsCollection
+          .find({ userEmail: email })
+          .sort({ createdAt: -1 }) // 🔽 Descending
+          .toArray();
+        res.json(history);
+      } catch (err) {
+        res.status(500).json({ error: "Failed to fetch user payment history" });
+      }
+    });
+
+    app.post("/create-payment-intent", async (req, res) => {
+      try {
+        const amountCost = req.body.amountCost;
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amountCost,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+        res.json({
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        res.status(400).send({ error: error.message });
+      }
+    });
+
+    app.post("/payments", async (req, res) => {
+      const { email, amount, currency, paymentIntentId } = req.body;
+
+      try {
+        // 1️⃣ Save payment history
+        const payment = {
+          userEmail: email,
+          amount,
+          currency,
+          paymentIntentId,
+          payment_status: "paid",
+          createdAt: new Date(),
+        };
+        await paymentsCollection.insertOne(payment);
+
+        // 2️⃣ Update user membership status (optional)
+        await postCollection.updateOne(
+          { email },
+          { $set: { isMember: true, badge: "gold" } }
+        );
+
+        res.json({ success: true, message: "Payment recorded successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Failed to save payment record" });
+      }
+    });
+
     // post//////////////////////////////////
+
+    app.get("/countPost", async (req, res) => {
+      const count = await postCollection.estimatedDocumentCount();
+      res.send({ count });
+    });
+
+    app.get("/post", async (req, res) => {
+      try {
+        const userEmail = req.query.email;
+        const query = userEmail ? { authorEmail: userEmail } : {};
+        const option = {
+          sort: {
+            createdAt: -1,
+          },
+        };
+        const result = await postCollection.find(query, option).toArray();
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: err.message });
+      }
+    });
+
+    app.post("/post", async (req, res) => {
+      try {
+        const post = req.body;
+        const result = await postCollection.insertOne(post);
+        res.send(result);
+      } catch (err) {
+        res.status(500).send({ error: err.message });
+      }
+    });
+
+    app.get("/post/search", async (req, res) => {
+      const query = req.query.email;
+
+      if (!query) {
+        return res.status(400).send({ message: "missing email query" });
+      }
+
+      const regex = new RegExp(query, "i");
+
+      const posts = await postCollection
+        .find({ authorEmail: { $regex: regex } })
+        .project({ authorEmail: 1, title: 1, tag: 1, createdAt: 1 })
+        .sort({ createdAt: -1 }) // newest first
+        .limit(10)
+        .toArray();
+
+      res.send(posts);
+    });
+
+    // app.get("/post/:email/role", async (req, res) => {
+    //   const email = req.params.email;
+
+    //   if (!email) {
+    //     return res.status(400).send({ message: "Email is required" });
+    //   }
+
+    //   const user = await postCollection.findOne(
+    //     { email },
+    //     {
+    //       projection: { role: 1 },
+    //       sort: { _id: -1 },
+    //     }
+    //   );
+
+    //   // If not found → default user role
+    //   const role = user?.role || "user";
+
+    //   res.send({ role });
+    // });
+
+    app.get("/post/:email/role", async (req, res) => {
+      try {
+        const email = req.query.email;
+        if (!email) {
+          return res.status(400).send({ message: "Email query is required" });
+        }
+
+        const post = await postCollection.findOne(
+          { authorEmail: email },
+          { projection: { role: 1 }, sort: { _id: -1 } }
+        );
+
+        if (!post) {
+          return res.status(404).send({ role: "user" });
+        }
+
+        res.send({ role: post.role || "user" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
+
+    app.patch("/post/:id/role", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { role } = req.body;
+
+        // role must be valid
+        if (!["admin", "user"].includes(role)) {
+          return res.status(400).send({ message: "Invalid Role Value" });
+        }
+
+        const query = { _id: new ObjectId(id) };
+
+        const updateDoc = {
+          $set: { role: role },
+        };
+
+        const result = await postCollection.updateOne(query, updateDoc);
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({
+          message: `✅ User role updated to: ${role}`,
+          result,
+        });
+      } catch (error) {
+        res.status(500).send({ message: "Internal Server Error", error });
+      }
+    });
+
+    app.delete("/post/:id", async (req, res) => {
+      const postId = req.params.id;
+      const query = { _id: new ObjectId(postId) };
+      const result = await postCollection.deleteOne(query);
+
+      res.send(result);
+    });
 
     // server.js
   } finally {
