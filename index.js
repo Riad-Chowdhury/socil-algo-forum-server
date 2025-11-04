@@ -266,27 +266,6 @@ const run = async () => {
       res.send(posts);
     });
 
-    // app.get("/post/:email/role", async (req, res) => {
-    //   const email = req.params.email;
-
-    //   if (!email) {
-    //     return res.status(400).send({ message: "Email is required" });
-    //   }
-
-    //   const user = await postCollection.findOne(
-    //     { email },
-    //     {
-    //       projection: { role: 1 },
-    //       sort: { _id: -1 },
-    //     }
-    //   );
-
-    //   // If not found → default user role
-    //   const role = user?.role || "user";
-
-    //   res.send({ role });
-    // });
-
     app.get("/post/:email/role", async (req, res) => {
       try {
         const email = req.query.email;
