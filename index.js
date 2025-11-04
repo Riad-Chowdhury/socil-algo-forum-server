@@ -135,26 +135,6 @@ const run = async () => {
       res.send({ ...newComment, _id: result.insertedId });
     });
 
-    // handle-payment
-    // app.post("/handle-payment", async (req, res) => {
-    //   const paymentIntent = await stripe.paymentIntents.create({
-    //     amount: 10000,
-    //     currency: "usd",
-    //     payment_method: req.body.id,
-    //     confirm: true,
-    //     automatic_payment_methods: {
-    //       enabled: true,
-    //       allow_redirects: "never",
-    //     },
-    //   });
-
-    //   if (paymentIntent.status == "succeeded") {
-    //     return res.json({ success: true });
-    //   }
-
-    //   return res.json({ success: false });
-    // });
-
     // payment/////////////
 
     app.get("/payments", async (req, res) => {
